@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-sprint-monit-api
+data:
+  AI_SPRINT_INFLUX_URL: http://ai-sprint-monit-influxdb:8086/
+  AI_SPRINT_INFLUX_TOKEN: __TOKEN__
+  AI_SPRINT_INFLUX_BUCKET: __BUCKET__
+  AI_SPRINT_WINDOW_LENGHT: __WINDOW__

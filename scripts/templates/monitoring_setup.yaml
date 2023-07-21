@@ -1,0 +1,18 @@
+# Default monitoring config
+monitoring:
+  metrics:
+    cpu: {}
+    mem: {}
+    swap: {}
+    processes: {}
+    system: {}
+    kernel: {}
+    disk:
+      ignore_fs: "[\"hostfs\", \"tmpfs\", \"devtmpfs\", \"devfs\", \"iso9660\", \"overlay\", \"aufs\", \"squashfs\"]"
+    diskio: {}
+    kubernetes: {}
+  time_period: 20s
+  parameters:
+    performance_metrics_time_window_width: 120s
+    default_notification_endpoint: ''
+  alerts: {}

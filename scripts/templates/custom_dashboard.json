@@ -1,0 +1,141 @@
+{{ define "panelJson" -}}
+{{if gt .idx 0}},{{end}}{
+      "datasource": {
+        "type": "influxdb",
+        "uid": "{{ .datasource }}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 50,
+            "gradientMode": "scheme",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {{- $inv := .inverted -}}
+              {{- range $i, $thr := .thresholds -}}
+              {{if $i}},{{end}}{
+                "color": "{{if eq (rem $i 2) $inv }}semi-dark-green{{else}}semi-dark-red{{end}}",
+                "value": {{ $thr }}
+              }
+              {{- end }}
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": {{ mul 12 (rem .idx 2) }},
+        "y": {{ mul 9 (math.Floor (div .idx 2)) }}
+      },
+      "id": {{ .idx }},
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "{{ .datasource }}"
+          },
+          "query": "from(bucket: \"{{ .appName }}-bucket\") |> range(start: v.timeRangeStart, stop:v.timeRangeStop) |> filter(fn: (r) => r[\"_measurement\"] == \"{{ .custName }}\" and r[\"_field\"] == \"{{ .fieldName }}\") |> keep(columns: [\"_time\", \"_value\"]) |> rename(columns: {\"_value\": \"{{ .fieldName }}\"}) |> sort(columns: [\"_time\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "{{ .title }}: {{ .custName }}[{{ .fieldName }}]",
+      "type": "timeseries"
+    }
+{{ end -}}
+
+{
+  "dashboard": {
+    "id": null,
+    "uid": null,
+    "title": "{{ .Env.APP_NAME }} : custom metrics",
+	"time": {
+		"from": "now-15m",
+		"to": "now"
+	},
+    "style": "dark",
+    "tags": [],
+    "timezone": "browser",
+    "schemaVersion": 35,
+    "version": 0,
+    "refresh": "1m",
+    "panels": [
+    {{- $idx := 0 -}}
+    {{- $datasource := .Env.DATASOURCE_UID -}}
+    {{- $metrics := (dict)}}
+    {{- if has .Val.monitoring "metrics" -}}
+ 	   {{- $metrics = .Val.monitoring.metrics }}
+    {{- end -}}
+    {{- $alerts := (dict)}}
+    {{- if has .Val.monitoring "alerts" -}}
+    	{{- $alerts = .Val.monitoring.alerts }}
+    {{- end -}}
+    {{- $appName := .Env.APP_NAME -}}
+    {{ range $cname, $ccontext := $metrics -}}
+        {{- $fields := (slice) -}}
+        {{- if and (test.IsKind "string" $ccontext) }}{{ if eq $ccontext "default" }}{{ $fields = (slice "value") }}{{ end }}{{ else }}{{ $fields = $ccontext.fields }}{{ end -}}
+		{{ range $fname := $fields -}}
+		    {{- $thresholds := (slice "null") -}}
+		    {{- $inverted := 0 -}}
+		    {{- range $aname, $alertDef := $alerts -}}
+		    	{{- if and (index $alertDef.condition "metric") (eq $alertDef.condition.metric.name $cname) (eq $alertDef.condition.metric.field $fname) }}
+			    	{{- if (eq $alertDef.condition.threshold.type "range") }}{{- $thresholds = $alertDef.condition.threshold.value | coll.Prepend "null" -}}
+			    	{{ else }}{{- $thresholds = (slice "null" $alertDef.condition.threshold.value) -}}
+			    		{{- if (eq $alertDef.condition.threshold.type "<") }}{{- $inverted = 1 -}}{{end -}}
+			    	{{ end -}}
+			    {{- end -}}
+		    {{- end -}}
+    	    {{ template "panelJson" (dict "appName" $appName "custName" $cname "title" "Metric" "fieldName" $fname "thresholds" $thresholds "datasource" $datasource "idx" $idx "inverted" $inverted) }}
+    	    {{- $idx = add $idx 1 -}}
+	    {{- end -}}
+    {{- end -}}
+    ]
+  },
+  "folderId": 0,
+  "message": "Automatic generation",
+  "overwrite": true
+}

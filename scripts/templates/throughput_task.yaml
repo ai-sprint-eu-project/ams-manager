@@ -1,0 +1,13 @@
+import "date"
+option task = {name: {{ printf "%s___throughput" .Env.APP_NAME | quote }}, every: {{ (datasource "Params").performance_metrics_time_window_width }}, offset: 0s}
+
+from(bucket: {{ .Env.BUCKET_NAME | quote }})
+  |> range(start: -{{ (datasource "Params").performance_metrics_time_window_width }})
+  |> filter(fn: (r) => r["_measurement"] == "execution_time")
+  |> filter(fn: (r) => r["component_name"] == "{{ .Val.system.throughput_component }}")
+  |> group()
+  |> distinct(column: "session_id")
+  |> count()
+  |> map(fn: (r) => ({_measurement: "throughput", _time: (r._start), _field: "throughput", _value: (float(v: r._value * 1000000000) / float(v: int(v: {{ (datasource "Params").performance_metrics_time_window_width }}))) }))
+  |> to(bucket: {{ .Env.BUCKET_NAME | quote }}, tagColumns: [])
+

@@ -1,0 +1,30 @@
+{{- $alertDef := index .Val.monitoring.alerts .Env.ALERT_NAME -}}
+import "influxdata/influxdb/monitor"
+import "influxdata/influxdb/v1"
+option task = {name: {{ printf "%s___alert_check" .Env.ALERT_NAME | quote }}, every: {{ $alertDef.every }}, offset: 0s}
+
+{{ $targetField := (print "cluster_" .Env.ALERT_NAME) -}}
+{{- if (index $alertDef.condition "flux_query") }}
+data = {{ $alertDef.condition.flux_query }}
+{{- else }}
+{{- if (index $alertDef.condition "metric") }}
+data =
+    from(bucket: "ai-sprint-monit")
+        |> range(start: -1m)
+        |> filter(fn: (r) => r["_measurement"] == {{ $alertDef.condition.metric.name | quote }})
+        |> filter(fn: (r) => r["_field"] == {{ $alertDef.condition.metric.field | quote }})
+        |> aggregateWindow(every: {{ $alertDef.every }}, fn: last, createEmpty: false)
+        |> keep(columns: ["_measurement", "_value", "_time"])
+        |> rename(columns: {"_value": {{ $targetField | quote }} })
+{{- else }}
+  {{- fail "At least one of metric or flux_query must be defined" }}
+{{- end }}
+{{- end }}
+
+check = {_check_id: {{ .Env.ALERT_ID | quote }}, _check_name: {{ .Env.ALERT_NAME | quote }}, _type: "custom", tags: {}}
+warn = (r) => 
+{{- if eq $alertDef.condition.threshold.type "range"}} r[{{ $targetField | quote }}] >= {{ index $alertDef.condition.threshold.value 0 }} and r[{{ $targetField | quote }}] <= {{ index $alertDef.condition.threshold.value 1 }}
+{{- else }} r[{{ $targetField | quote }}] {{ $alertDef.condition.threshold.type }} {{ $alertDef.condition.threshold.value }}
+{{- end }}
+messageFn = (r) => "Checking ${r._check_name} alert: ${r._level}"
+data |> monitor["check"](data: check, messageFn: messageFn, warn: warn)

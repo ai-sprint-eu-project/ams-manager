@@ -1,0 +1,222 @@
+{{ define "panelJson" -}}
+	,{
+      "datasource": {
+        "type": "influxdb",
+        "uid": "{{ .datasource }}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#9f9f9f",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 50,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+              {{- range $thr := .thresholds}}
+              , {
+                "color": "red",
+                "value": {{ $thr }}
+              }
+              {{- end }}
+
+            ]
+          },
+          "unit": "{{ .unit }}"
+        },
+        "overrides": [
+{{- $ni := .ni -}}
+{{- $colors := .colors}}
+{{- $fields := .fields}}
+{{- $notfirst := 0}}
+{{- range $i, $node := .nodes }}
+    {{- if or (and (eq $ni 0) (gt $i 0)) (and (gt $ni 0) (eq $i $ni)) }}
+		{{- $color := index $colors (rem (add $i -1) 6) }} 
+		{{- range $j, $field := $fields }}
+			{{- if $notfirst}},{{else}}{{$notfirst = 1}}{{end}}
+			  {
+			    "matcher": {
+			      "id": "byRegexp",
+			      "options": "{{ $field }}( {{ $node }}|(.*)node_name=\"{{ $node }}\"(.*))"
+			    },
+			    "properties": [
+			      {
+			        "id": "color",
+			        "value": {
+			          "fixedColor": "{{if eq $j 0}}dark-{{end -}}{{if gt $j 1}}light-{{end -}}{{ $color }}",
+			          "mode": "fixed"
+			        }
+			      }
+			    ]
+			  }
+   		{{- end}}
+	{{- end}}
+{{- end}}
+    ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": {{ mul 12 (rem .idx 2) }},
+        "y": {{ .y_pos }}
+      },
+      "id": {{ add (mul .y_pos 1000) .idx }},
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "{{ .datasource }}"
+          },
+          "query": "from(bucket: \"ai-sprint-monit\") |> range(start: v.timeRangeStart, stop:v.timeRangeStop) |> filter(fn: (r) => r[\"_measurement\"] == \"{{ .measurement }}\" and ({{ range $i, $field := .fields }}{{if $i}} or {{end}}r[\"_field\"] == \"{{ $field }}\"{{end}}){{if ne .ni 0}} and r[\"node_name\"] == \"{{ .node }}\"{{end}})",
+          "refId": "A"
+        }
+      ],
+      "title": "{{ .title }}",
+      "type": "timeseries"
+    }
+{{ end -}}
+
+
+{{- define "rowJson" -}}
+{{- if gt .y_pos 0}},{{end}}
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": {{ .y_pos }}
+      },
+      "id": null,
+      "panels": [],
+      "title": "{{ .title }}",
+      "type": "row"
+    }
+{{- end -}}
+
+{
+  "dashboard": {
+    "id": null,
+    "uid": null,
+    "title": "Cluster monitoring",
+	"time": {
+		"from": "now-15m",
+		"to": "now"
+	},
+    "style": "dark",
+    "tags": [],
+    "timezone": "browser",
+    "schemaVersion": 35,
+    "version": 0,
+    "refresh": "1m",
+    "panels": [
+    {{- $datasource := .Env.DATASOURCE_UID -}}
+    {{- $metrics := (dict)}}
+    {{- if has .Val.monitoring "metrics" -}}
+ 	   {{- $metrics = .Val.monitoring.metrics }}
+    {{- end -}}
+    {{- $alerts := (dict)}}
+    {{- if has .Val.monitoring "alerts" -}}
+    	{{- $alerts = .Val.monitoring.alerts }}
+    {{- end -}}
+    {{ $y_pos := 0 }}
+ 
+	{{- $config := (slice
+		(slice "System: load (all cores)" "system" "system" "load1" "percentunit")
+		(slice "Memory: used %" "mem" "mem" "used_percent" "percent")
+		(slice "CPU: used user and system %" "cpu" "cpu" "usage_user,usage_system" "percent")
+		(slice "Disk: used %" "disk" "disk" "used_percent" "percent")
+		(slice "Swap: used %" "swap" "swap" "used_percent" "percent")
+		(slice "Disk IO: IO time" "diskio" "diskio" "weighted_io_time" "ms")
+		(slice "Kernel: forked processes" "kernel" "kernel" "processes_forked" "none")
+		(slice "Kubernetes: cpu usage nanocores" "kubernetes" "kubernetes_system_container" "cpu_usage_nanocores" "none")
+	) }}
+	
+	{{- $colors := (slice "blue" "yellow" "green" "orange" "purple" "red") -}}
+    
+    {{- $nodes := (datasource "Nodes") | coll.Prepend "All nodes" }}
+	{{ range $ni, $node := $nodes -}}
+	
+		{{- $title := (print "Node: " $node) -}}
+		{{- if eq $ni 0 -}}
+			{{- $title = $node -}}
+		{{- end -}}
+		{{ template "rowJson" (dict "title" $title "y_pos" $y_pos) }}
+		{{- $y_pos = add $y_pos 1 -}}
+		
+		{{- $idx := 0 -}}
+		{{ range $entry := $config -}}
+			{{- $metric := index $entry 1 -}}
+		    {{- if has $metrics $metric }}
+		    	{{ $title := index $entry 0 }}
+		    	{{ $measurement := index $entry 2 }}
+		    	{{ $fields := strings.Split "," (index $entry 3) }}
+		    	{{ $unit := index $entry 4 }}
+				{{- $thresholds := (slice) -}}
+					{{ range $field := $fields -}}
+						{{- range $aname, $alertDef := $alerts -}}
+							{{- if and (index $alertDef.condition "metric") (eq $alertDef.condition.metric.name $measurement) (eq $alertDef.condition.metric.field $field) }}
+								{{- if (eq $alertDef.condition.threshold.type "range") }}{{- $thresholds = $alertDef.condition.threshold.value -}}{{ else }}{{- $thresholds = (slice $alertDef.condition.threshold.value) -}}{{ end -}}
+							{{- end -}}
+						{{- end -}}
+					{{- end -}}
+				{{ template "panelJson" (dict "measurement" $measurement "fields" $fields "title" $title "unit" $unit "thresholds" $thresholds "datasource" $datasource "idx" $idx "y_pos" $y_pos "colors" $colors "node" $node "nodes" $nodes "ni" $ni) }}
+				{{- $y_pos = conv.ToInt (add $y_pos (mul 9 (math.Floor (rem $idx 2)))) -}}
+				{{- $idx = add $idx 1 -}}
+		    {{- end -}}
+		{{- end -}}
+		{{- $y_pos = conv.ToInt (add $y_pos (mul 9 (math.Floor (rem $idx 2)))) -}}
+				
+    {{- end -}}
+
+    ]
+  },
+  "folderId": 0,
+  "message": "Automatic generation",
+  "overwrite": true
+}

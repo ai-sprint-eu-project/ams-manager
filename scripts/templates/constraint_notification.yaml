@@ -1,0 +1,30 @@
+{{- $alertDef := index (index .Val.system .Env.GLOBAL_LOCAL) .Env.CONSTRAINT_NAME -}}
+import "influxdata/influxdb/monitor"
+import "http"
+import "json"
+import "experimental"
+
+option task = {name: {{ printf "%s_%s___constraint_notification" .Env.APP_NAME .Env.CONSTRAINT_NAME | quote }}, every: {{ (datasource "Params").performance_metrics_time_window_width }}, offset: 2s}
+
+headers = {"Content-Type": "application/json"}
+endpoint = http["endpoint"](url: {{ (datasource "Params").default_notification_endpoint | quote }})
+notification = {
+    _notification_rule_id: {{ .Env.ALERT_ID | quote }},
+    _notification_rule_name: {{ .Env.CONSTRAINT_NAME | quote }},
+    _notification_endpoint_id: {{ .Env.ALERT_ID | quote }},
+    _notification_endpoint_name: {{ (datasource "Params").default_notification_endpoint | quote }},
+}
+statuses = monitor["from"](start: -{{ (datasource "Params").performance_metrics_time_window_width }})
+warn = statuses |> filter(fn: (r) => r["_level"] == "warn" and r["_check_name"] == {{ .Env.CONSTRAINT_NAME | quote }})
+all_statuses = warn |> filter(fn: (r) => r["_time"] >= experimental["subDuration"](from: now(), d: {{ (datasource "Params").performance_metrics_time_window_width }}))
+
+{{ $targetField := "" }}{{if (eq .Env.GLOBAL_LOCAL "global_constraints") }}{{ $targetField = (print "global_" .Env.CONSTRAINT_NAME ) }}{{else}}{{ $targetField = (print "local_" .Env.CONSTRAINT_NAME) }}{{end -}}
+all_statuses
+    |> monitor["notify"](
+        data: notification,
+        endpoint: endpoint(mapFn: (r) => {
+            body = {"constraint": r["_check_name"], "value": r[{{ $targetField | quote }}], "check_time": r["_stop"], "status_timestamp": r["_status_timestamp"]}
+            return {headers: headers, data: json["encode"](v: body)}
+        }),
+    )
+

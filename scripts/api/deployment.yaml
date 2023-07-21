@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-sprint-monit-api
+  labels:
+    app: ai-sprint-monit-api
+spec:
+  selector:
+    matchLabels:
+      app: ai-sprint-monit-api
+  template:
+    metadata:
+      name: ai-sprint-monit-api
+      labels:
+        app: ai-sprint-monit-api
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: api
+          image: registry.gitlab.polimi.it/ai-sprint/monitoring-subsystem/ai-sprint-monit-api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: ai-sprint-monit-api
+        - name: nginx
+          image: nginx:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /etc/nginx/conf.d
+              name: nginx-config
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: ai-sprint-monit-api-nginx
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule

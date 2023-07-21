@@ -1,0 +1,133 @@
+{{ define "panelJson" -}}
+{{if gt .idx 0}},{{end}}{
+      "datasource": {
+        "type": "influxdb",
+        "uid": "{{ .datasource }}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            {{- if eq .color "thresholds" }}
+             "mode": "thresholds"           
+            {{- else }}
+            "fixedColor": "{{ .color }}",
+            "mode": "fixed"
+            {{- end}}
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 50,
+            "gradientMode": "scheme",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "semi-dark-green",
+                "value": null
+              }{{if not (test.IsKind "string" .threshold) }},
+              {
+                "color": "semi-dark-red",
+                "value": {{ .threshold }}
+              }
+              {{- end -}}
+            ]
+          },
+          "unit": "{{if eq .title "Throughput" }}cps{{else}}s{{end}}"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": {{ mul 12 (rem .idx 2) }},
+        "y": {{ mul 9 (math.Floor (div .idx 2)) }}
+      },
+      "id": {{ .idx }},
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "{{ .datasource }}"
+          },
+          {{- if eq .title "Throughput" }}
+          "query": "from(bucket: \"{{ .appName }}-bucket\") |> range(start: v.timeRangeStart, stop:v.timeRangeStop) |> filter(fn: (r) => r[\"_measurement\"] == \"throughput\")",
+          {{- else }}
+          "query": "from(bucket: \"{{ .appName }}-bucket\") |> range(start: v.timeRangeStart, stop:v.timeRangeStop) |> filter(fn: (r) => r[\"_measurement\"] == \"constraint_check\" and r[\"constraint\"] == \"{{ .constName }}\" and r[\"_field\"] == \"{{ .prefix }}{{ .constName }}\")",
+          {{- end }}
+          "refId": "A"
+        }
+      ],
+      "title": "{{ .title }}{{range $i, $el := .path}}{{if $i}}-{{end}}{{$el}}{{end}}",
+      "type": "timeseries"
+    }
+{{ end -}}
+
+{
+  "dashboard": {
+    "id": null,
+    "uid": null,
+    {{- $appName := .Env.APP_NAME -}}
+    "title": "{{ $appName }} : execution time constraints",
+	"time": {
+		"from": "now-15m",
+		"to": "now"
+	},
+    "style": "dark",
+    "tags": [],
+    "timezone": "browser",
+    "schemaVersion": 35,
+    "version": 0,
+    "refresh": "1m",
+    "panels": [
+    {{- $datasource := .Env.DATASOURCE_UID -}}
+    {{ template "panelJson" (dict "appName" $appName "constName" .Val.system.throughput_component "title" "Throughput" "path" (slice) "threshold" "" "datasource" $datasource "prefix" "" "idx" 0 "color" "semi-dark-blue") }}
+    {{- $idx := 1 -}}
+    {{ range $cname, $ccontext := (index .Val.system.global_constraints) -}}
+    	{{ template "panelJson" (dict "appName" $appName "constName" $cname "title" "Path constraint: " "path" $ccontext.path_components "threshold" $ccontext.threshold "datasource" $datasource "prefix" "global_" "idx" $idx "color" "thresholds") }}{{- $idx = add $idx 1 -}}
+    {{- end -}}
+    {{ range $cname, $ccontext := (index .Val.system.local_constraints) -}}
+    	{{ template "panelJson" (dict "appName" $appName "constName" $cname "title" "Component constraint: " "path" (slice $ccontext.component_name) "threshold" $ccontext.threshold "datasource" $datasource "prefix" "local_" "idx" $idx "color" "thresholds") }}{{- $idx = add $idx 1 -}}
+    {{- end -}}
+    ]
+  },
+  "folderId": 0,
+  "message": "Automatic generation",
+  "overwrite": true
+}

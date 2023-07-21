@@ -1,0 +1,44 @@
+{{- $alertDef := index (index .Val.system .Env.GLOBAL_LOCAL) .Env.CONSTRAINT_NAME -}}
+import "influxdata/influxdb/monitor"
+import "influxdata/influxdb/v1"
+option task = {name: {{ printf "%s_%s___constraint_check" .Env.APP_NAME .Env.CONSTRAINT_NAME | quote }}, every: {{ (datasource "Params").performance_metrics_time_window_width }}, offset: 0s}
+
+{{ $firstComp := "" }}{{ $lastComp := "" -}}
+{{- if (eq .Env.GLOBAL_LOCAL "global_constraints") }}{{ $firstComp = index $alertDef.path_components 0 }}{{ else }}{{ $firstComp = $alertDef.component_name }}{{ end -}}
+{{- if (eq .Env.GLOBAL_LOCAL "global_constraints") }}{{ $lastComp = index $alertDef.path_components (add (len $alertDef.path_components) -1) }}{{ else }}{{ $lastComp = $alertDef.component_name }}{{ end -}}
+
+lastCompMax = from(bucket: "{{ .Env.APP_NAME }}-bucket")
+  |> range(start: -{{ (datasource "Params").performance_metrics_time_window_width }})
+  |> filter(fn: (r) => r["_measurement"] == "execution_time" and r["_field"] == "job_end_time" and r["component_name"] == {{ $lastComp | quote }})
+  |> keep(columns: ["_field", "_value", "session_id", "_time"])
+  |> group(columns: ["session_id"])
+  |> max()
+
+sessions = lastCompMax
+  |> group()
+  |> distinct(column: "session_id")
+  |> tableFind(fn: (key) => true)
+  |> getColumn(column: "_value")
+
+firstCompMin = from(bucket: "{{ .Env.APP_NAME }}-bucket")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r["_measurement"] == "execution_time" and r["_field"] == "job_start_time" and r["component_name"] == {{ $firstComp | quote }} and contains(set: sessions, value: r["session_id"]))
+  |> keep(columns: ["_field", "_value", "session_id", "_time"])
+  |> group(columns: ["session_id"])
+  |> min()
+
+{{ $targetField := "" }}{{if (eq .Env.GLOBAL_LOCAL "global_constraints") }}{{ $targetField = (print "global_" .Env.CONSTRAINT_NAME ) }}{{else}}{{ $targetField = (print "local_" .Env.CONSTRAINT_NAME) }}{{end -}}
+avgPathTime = join(tables: {min: firstCompMin, max: lastCompMax}, on: ["session_id"])
+  |> map(fn: (r) => ({ r with _value: r["_value_max"] - r["_value_min"], _measurement: "constraint_check", constraint: {{ .Env.CONSTRAINT_NAME | quote }}}))
+  |> rename(columns: {_time_max: "_time"})
+  |> keep(columns: ["_value", "_time", "_measurement", "constraint"])
+  |> group(columns: ["_measurement", "constraint"])
+  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)
+  |> rename(columns: {"_value": {{ $targetField | quote }} }) 
+
+avgPathTime |> to(bucket: {{ .Env.BUCKET_NAME | quote }}, tagColumns: ["constraint"], fieldFn: (r) => ({ {{ $targetField | quote }}: r[{{ $targetField | quote }}]}))
+
+check = {_check_id: {{ .Env.ALERT_ID | quote }}, _check_name: {{ .Env.CONSTRAINT_NAME | quote }}, _type: "custom", tags: {}}
+warn = (r) => r[{{ $targetField | quote }}] > {{ $alertDef.threshold }}
+messageFn = (r) => "Constraint ${r._check_name}: ${r._level}"
+avgPathTime |> monitor["check"](data: check, messageFn: messageFn, warn: warn)

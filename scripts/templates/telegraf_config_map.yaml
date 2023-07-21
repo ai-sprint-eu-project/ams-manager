@@ -1,0 +1,69 @@
+apiVersion: v1
+data:
+  ai-sprint-monitoring.conf: |+ {{ $monit := .Val.monitoring }}
+    [global_tags]
+      node_name = "$NODE_NAME"  
+    [agent]
+      interval = {{ $monit.time_period | quote }}
+      round_interval = true
+      metric_batch_size = 1000
+      metric_buffer_limit = 10000
+      collection_jitter = "0s"
+      flush_interval = "10s"
+      flush_jitter = "0s"
+      precision = ""
+      debug = false
+      quiet = true
+      logfile = ""
+      hostname = "$HOSTNAME"
+      omit_hostname = true
+    [[outputs.influxdb_v2]]
+      urls = ["http://ai-sprint-monit-influxdb:8086"]
+      token = "$INFLUX_TOKEN"
+      timeout = "5s"
+      organization = "ai-sprint"
+      bucket = "ai-sprint-monit"    
+  {{- if has $monit.metrics "cpu" }}
+    [[inputs.cpu]]
+      percpu = false
+      totalcpu = true
+      collect_cpu_time = false
+      report_active = true
+  {{- end }}
+  {{- if has $monit.metrics "kernel" }}
+    [[inputs.kernel]]
+  {{- end }}
+  {{- if has $monit.metrics "mem" }}
+    [[inputs.mem]]
+  {{- end }}
+  {{- if has $monit.metrics "processes" }}
+    [[inputs.processes]]
+  {{- end }}
+  {{- if has $monit.metrics "swap" }}
+    [[inputs.swap]]
+  {{- end }}
+  {{- if has $monit.metrics "system" }}
+    [[inputs.system]]
+  {{- end }}
+  {{- if has $monit.metrics "disk" }}
+    [[inputs.disk]]
+    {{- if has $monit.metrics.disk "ignore_fs" }}
+      ignore_fs = {{ $monit.metrics.disk.ignore_fs }}
+    {{- end }}    
+  {{- end }}
+  {{- if has $monit.metrics "diskio" }}
+    [[inputs.diskio]]
+    {{- if has $monit.metrics.diskio "devices" }}
+      devices = {{ $monit.metrics.diskio.devices }}
+    {{- end }}    
+  {{- end }}
+  {{- if has $monit.metrics "kubernetes" }}
+    [[inputs.kubernetes]]
+      url = "https://kubernetes.default.svc.cluster.local/api/v1/nodes/$NODE_NAME/proxy/"
+      bearer_token = "/run/secrets/kubernetes.io/serviceaccount/token"
+      insecure_skip_verify = true
+      namepass=["kubernetes_system_container", "kubernetes_node"]
+      [inputs.kubernetes.tagpass]
+        container_name = [ "pods" ]
+        node_name = [ "*" ]
+ {{- end }}

@@ -1,0 +1,29 @@
+{{- $alertDef := index .Val.monitoring.alerts .Env.CUSTOM_NAME -}}
+import "influxdata/influxdb/monitor"
+import "http"
+import "json"
+import "experimental"
+
+option task = {name: {{ printf "%s___custom_notification" .Env.CUSTOM_NAME | quote }}, every: {{ $alertDef.every }}, offset: 2s}
+
+headers = {"Content-Type": "application/json"}
+endpoint = http["endpoint"](url: {{ $alertDef.notification_endpoint.url | quote }})
+notification = {
+    _notification_rule_id: {{ .Env.ALERT_ID | quote }},
+    _notification_rule_name: {{ .Env.CUSTOM_NAME | quote }},
+    _notification_endpoint_id: {{ .Env.ALERT_ID | quote }},
+    _notification_endpoint_name: {{ $alertDef.notification_endpoint.url | quote }},
+}
+statuses = monitor["from"](start: -{{ $alertDef.every  }})
+warn = statuses |> filter(fn: (r) => r["_level"] == "warn" and r["_check_name"] == {{ .Env.CUSTOM_NAME | quote }})
+all_statuses = warn |> filter(fn: (r) => r["_time"] >= experimental["subDuration"](from: now(), d: {{ $alertDef.every }}))
+
+{{ $targetField := (print "custom_" .Env.CUSTOM_NAME) -}}
+all_statuses
+    |> monitor["notify"](
+        data: notification,
+        endpoint: endpoint(mapFn: (r) => {
+            body = {"custom_alert": r["_check_name"], "value": r[{{ $targetField | quote }}], "check_time": r["_stop"], "status_timestamp": r["_status_timestamp"]}
+            return {headers: headers, data: json["encode"](v: body)}
+        }),
+    )
